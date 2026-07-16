@@ -317,15 +317,56 @@ both deck-aware. Head-to-head (`results/ntsearch_summaries.jsonl`):
   to the hand heuristic as an expectimax leaf (T3); a weaker greedy value won't beat
   it, so skip the T3-style leaf eval for T4.
 
-### T6 — big2 + constant α (complete the 2×2) — ★ RUNNING (machine 01)
-`scripts/train_big2.sh` → `models/ntuple_big2.gob`, 15M games, big2, constant
-α=0.1 (T2's recipe with big2's capacity). Fourth cell of the design
-(big/big2 × const-α/TC+anneal); T4 vs T6 isolates whether TC+anneal hurt, T2 vs T6
-isolates whether big2 is just under-trained. **Launched on machine 01** (freed after
-T4). Expected reads: if T6 clears ~21k → TC+anneal was the culprit in T4; if T6 also
-stalls near ~10k → big2's 2× weights are just badly under-trained at 15M. Fetch the
-`.gob` + `train_big2.log` from `cloud-results` when done (no-overwrite), then curve
-it vs T2/T4 with `scripts/learning_curve.py`.
+### T5 — big + TC + α anneal (ablation for T4) — ★ done
+`scripts/train_big_tc.sh` → `models/ntuple_big_tc.gob` (60 MB), 15M games, `big`
+(4×6) + `-tc` + α 0.1→0.01 (machine 02, `results/cloud_t5/train_big_tc.log`). Greedy
+mean: 8.5k@1M → 14.0k@7M → 14.7k@10M → **16.0k@15M** (peak 16k, 3072/6144 stay 0%).
+Isolates the TC+anneal levers with the tuple set held at `big`: **T2 (big, const α,
+21.0k) → T5 (big, TC+anneal, 16.0k) = −24%.** TC+anneal *hurts*, and the curve
+flattens early (only +0.7k over 7M→10M) — the α-anneal starves late learning.
+
+### T6 — big2 + constant α (complete the 2×2) — ★ done
+`scripts/train_big2.sh` → `models/ntuple_big2.gob` (117 MB), 15M games, `big2` (8×6),
+constant α=0.1 (machine 01, `results/cloud_t6/train_big2.log`). Greedy mean:
+6.2k@1M → 11.1k@7M → 13.5k@10M → **16.5k@15M** (still rising steeply, +3.0k over
+10M→15M; 3072/6144 stay 0%). Isolates big2's capacity with α held constant: **T2
+(big, 21.0k) → T6 (big2, 16.5k) = −21% at 15M** — but T6 has the *steepest* late slope
+of any run and has not plateaued, so big2 is **under-trained, not inherently worse.**
+
+### ★ The 2×2 ablation — TC+anneal HURTS, big2 is UNDER-TRAINED (T4 stacked both)
+> Greedy self-play mean (N=1000 held-out), at each run's end. This is the clean
+> attribution of T4's regression, and a tidy paper result.
+
+|             | constant α | TC + α-anneal |
+|---|---:|---:|
+| **big** (4×6)  | **T2 = 20,968** (@10M) | T5 = 16,028 (@15M) |
+| **big2** (8×6) | T6 = 16,506 (@15M) | **T4 = 9,608** (@15M) |
+
+- **TC + α-anneal consistently hurts** (hold tuples fixed): big −24% (T2→T5), big2
+  −42% (T6→T4). The linearly-annealed α (0.1→0.01) drops the learning rate too low too
+  early, so the net under-learns; TC compounds it. **Verdict: drop TC+anneal for this
+  task.**
+- **big2 is under-trained, not worse** (hold α fixed): big2 is −21% (const) / −40%
+  (TC+anneal) vs big *at 15M*, but its curve is the steepest still-rising one (+3.0k in
+  its last 5M). 2× the weights need ≫15M games to fill.
+- **T4's regression = both handicaps compounding** (big2 under-training × TC+anneal's
+  LR-starvation) → ~9.6k, less than half of T2.
+- **T2 (big + constant α) remains the best model** (~21k, and it too was still rising at
+  10M — the const-α/big recipe both learns fastest *and* highest at this budget).
+- Skip the T3-style leaf eval for T5/T6: both are *weaker* greedy than T2, and T2 as a
+  leaf already lost to the hand heuristic at d4–d5 (and is 8–11× slower), so weaker
+  learned leaves won't beat it either. (Re-open only if a resumed run clears ~25k.)
+
+### T7 / T8 — resume the const-α runs to the true ceiling — planned (both machines free)
+Both the winning cells were **still climbing** when stopped, so the immediate strength
+win is simply more games on the const-α recipe (never TC/anneal again):
+- **T7 = resume T2** (`big` + const α) from `models/ntuple_big.gob` to 25–30M
+  (`scripts/train_big_resume.sh`). Highest confidence: proven-best recipe, +2.5k over
+  its last 3M, and `big` is the fastest to train *and* to evaluate as a leaf.
+- **T8 = resume T6** (`big2` + const α) from `models/ntuple_big2.gob` to 35–40M
+  (`scripts/train_big2_resume.sh`). The capacity bet: steepest late slope; if it
+  overtakes T2, big2 was just under-trained (new best); if it plateaus below, `big` is
+  the right size. `git lfs` for the 117 MB checkpoint.
 
 _Planned later: DQN / PPO / AlphaZero-style baselines (Phase 3, needs a GPU box)._
 
