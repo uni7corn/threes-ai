@@ -30,13 +30,16 @@ improve beyond:
 bash scripts/gen_teacher.sh 8000 4          # -> data/teacher.bin (~10M positions)
 # 2. distill into PVNet on the H100 (imitates depth-4 expectimax in one forward pass)
 python rl/distill.py --data data/teacher.bin --epochs 30 --batch 4096 --out models/distilled.pt
-# 3. AlphaZero self-play, warm-started (the surpass attempt)
-python rl/alphazero.py --init models/distilled.pt --iters 400
+# 3. AlphaZero self-play, warm-started (the surpass attempt), batched for the H100
+python rl/alphazero.py --init models/distilled.pt --parallel 256 --sims 64 --iters 400
 ```
-The distilled net is *also* a fast strong leaf on its own: read a score-scale value as
-`atanh(v) * VALUE_SCALE` (VALUE_SCALE=200000 in distill.py). Efficiency TODO for the
-big H100 run: batch the MCTS leaf evaluations + parallel self-play workers (the current
-skeleton evaluates one leaf per forward pass — fine for correctness, wasteful on an H100).
+`--parallel N` plays N games in flight and evaluates every simulation's N leaves in ONE
+batched forward pass (raise it to 512/1024 to fill a bigger GPU). Value target and net
+match distill.py, so the warm start is seamless. The distilled net is *also* a fast
+strong leaf: read a score-scale value as `atanh(v) * VALUE_SCALE` (200000). The
+Python-side MCTS descent is now the CPU cost; a further step would be a Go/vectorised
+env for the descent, but batched leaf eval already turns the ~1-core skeleton into a
+GPU-saturating loop.
 
 ## Setup & run
 ```bash
