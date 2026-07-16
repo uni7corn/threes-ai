@@ -149,7 +149,7 @@ def _deck_from_log(path):
 
 
 def play(a):
-    mc = MoveClient(a.server)
+    mc = MoveClient(a.server, timeout=a.move_timeout)
     print("moveserver:", mc.ping(), flush=True)
     deck, prior = _deck_from_log(a.resume_log)
     log = open(a.resume_log, "a", buffering=1)     # line-buffered append; survives restarts
@@ -302,6 +302,12 @@ def main():
     ap.add_argument("--resume-log", required=True, help="JSONL ply log (appended across restarts)")
     ap.add_argument("--gameover-png", default="/tmp/threesgame_gameover.png")
     ap.add_argument("--depth-cap", type=int, default=5)
+    ap.add_argument("--move-timeout", type=float, default=30.0,
+                    help="HTTP timeout for one moveserver /move call. The default 30s is "
+                         "ample at depth<=4 (~360ms/move) but a deep search (depth 6+) has "
+                         "slow positions that blow past it — the urllib TimeoutError kills "
+                         "this process, the supervisor relaunches it, and the relaunch storm "
+                         "loads the box so moves get slower still. Raise it with the depth.")
     a = ap.parse_args()
     play(a)
 
