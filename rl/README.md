@@ -12,10 +12,31 @@ higher-value route, while these need far more compute for less).
   the nets consume. Run `python threes_env.py` for a random-policy self-check.
 - `dqn.py` — conv Q-net + replay + target net, epsilon-greedy masked to legal moves.
 - `ppo.py` — conv actor-critic, GAE, clipped PPO objective, masked policy.
-- `alphazero.py` — policy+value net + sampled stochastic MCTS (decision nodes via
-  PUCT, chance nodes sampled), self-play targets. The heaviest / most experimental.
+- `alphazero.py` — policy+value net (`PVNet`) + sampled stochastic MCTS (decision
+  nodes via PUCT, chance nodes sampled), self-play targets. `--init <ckpt>` warm-starts
+  from a distilled net. The heaviest / most experimental.
+- `distill.py` — supervised distillation of the deck-aware expectimax teacher into
+  `PVNet` (policy CE + value MSE), on GPU. Its checkpoint is a drop-in AlphaZero warm
+  start. Consumes the binary from the Go `cmd/gen-teacher`.
 
 These are **runnable skeletons to be tuned**, not finished agents.
+
+## The distillation pipeline ("beat expectimax" attempt, GPU)
+A from-scratch AlphaZero struggles against an expectimax that already reaches the
+game's ceiling (12288). So we **warm-start** it from the teacher, then let self-play
+improve beyond:
+```bash
+# 1. teacher data on the 240-core box (deck-aware depth-4 expectimax self-play)
+bash scripts/gen_teacher.sh 8000 4          # -> data/teacher.bin (~10M positions)
+# 2. distill into PVNet on the H100 (imitates depth-4 expectimax in one forward pass)
+python rl/distill.py --data data/teacher.bin --epochs 30 --batch 4096 --out models/distilled.pt
+# 3. AlphaZero self-play, warm-started (the surpass attempt)
+python rl/alphazero.py --init models/distilled.pt --iters 400
+```
+The distilled net is *also* a fast strong leaf on its own: read a score-scale value as
+`atanh(v) * VALUE_SCALE` (VALUE_SCALE=200000 in distill.py). Efficiency TODO for the
+big H100 run: batch the MCTS leaf evaluations + parallel self-play workers (the current
+skeleton evaluates one leaf per forward pass — fine for correctness, wasteful on an H100).
 
 ## Setup & run
 ```bash

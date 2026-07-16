@@ -113,10 +113,15 @@ def main():
     ap.add_argument("--sims", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out", default="models/alphazero.pt")
+    ap.add_argument("--init", default="", help="warm-start from a distilled checkpoint (rl/distill.py)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     net = PVNet().to(device)
+    if args.init:  # warm-start: the distilled net already plays near depth-D expectimax
+        ckpt = torch.load(args.init, map_location=device)
+        net.load_state_dict(ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt)
+        print(f"warm-started from {args.init}")
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
     seed = 10_000_000
 
