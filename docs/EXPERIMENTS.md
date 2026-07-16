@@ -389,13 +389,14 @@ schema (plays in `web/replay.html`); `deploy/recorder.py` keeps only the best ga
 
 | Site | Engine | Final score | Max tile | Moves | Player name |
 |------|--------|------------:|---------:|------:|-------------|
-| threesjs.io (Unity WebGL) | canvas colour+OCR, engine-in-the-loop | **9,993** | 384 | 431 | Github halfrost |
+| threesjs.io (Unity WebGL) | canvas colour+OCR, engine-in-the-loop | **20,769** | **768** | 505 | Github halfrost |
 | play.threesgame.com (WebGL) | localStorage slot.0 (exact board) | **200,142** | **3072** | 2034 | Github halfrost |
 | **native iOS Threes on Apple-Silicon Mac** | screen vision + engine-trust tracking, MOUSE-drag driven | **30,285** | **768** | ~230 | in-app `Github halfrost` |
 
 The two web sites went to a genuine game over ("Out of moves!"). For each we captured the site's own
-**score-settlement screen** — threesjs.io shows `Your score: 9,993` on its Unity
-game-over screen; play.threesgame.com flips every tile to its point value and
+**score-settlement screen** — threesjs.io shows `Your score: 20,769` on its Unity
+game-over screen (a **768** tile, 505 moves — `results/replays/threesjs/settlement_20769.png`);
+play.threesgame.com flips every tile to its point value and
 tallies **200,142** on its best game (a **3072** tile, 2034 moves —
 `results/replays/threesgame/settlement_200142.png`; the WebGL buffer must be preserved
 to screenshot it non-black, and the reveal only arms on a live game over). Getting that
@@ -405,6 +406,19 @@ canvas at a mid-game score — this is how a raw 67,428 with no real settlement 
 looked like the best), and a large restart budget (300) so a long ~2000-move game can
 reach its real "Out of moves!" through the ~15-plies-per-wedge WebGL stalls. Replays +
 settlement screenshots under `results/replays/{threesjs,threesgame}/` (gitignored).
+
+threesjs.io needed a different fix — one that more than doubled its score (9,993 → 20,769).
+Its board is read by an engine-in-the-loop tracker that stays pixel-perfect (a per-move
+engine-vs-full-OCR audit showed **0 mismatches**), yet depth-4 kept collapsing at a ~384
+ceiling. The audit found the real culprit in the **next-tile preview**: a "3" preview
+renders as an almost blank white card whose faint digit tesseract read as `-1` (=bonus)
+**100 %** of the time — never once reading a 3. That silently told the deck-aware search a
+bonus "+" was coming on ~⅓ of all turns (every 3) and desynced the `DeckTracker`, starving
+the search of the one certain look-ahead it has. The preview is only ever 1/2/3/bonus
+(never a high tile), so reading it by **colour** (red=1, blue=2, near-white card=3,
+else bonus) instead of OCR fixed it: `nv=3` began appearing immediately and a single game
+jumped to 20,769 / 768. A reminder that a perfectly-tracked *board* can still be sabotaged
+by a mis-read *hint*.
 
 The **native iOS Threes app running on an Apple-Silicon Mac** is the third target and
 the hardest — no DOM, no localStorage we could decode, an obfuscated + cfprefsd-cached
