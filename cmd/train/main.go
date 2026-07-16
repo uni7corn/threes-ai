@@ -20,9 +20,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/halfrost/threes-ai/ai"
 	"github.com/halfrost/threes-ai/engine"
 	"github.com/halfrost/threes-ai/gameboard"
 	"github.com/halfrost/threes-ai/ntuple"
+	"github.com/halfrost/threes-ai/utils"
 )
 
 // bestMove picks the greedy move for g: the legal move maximising
@@ -46,10 +48,31 @@ func bestMove(net *ntuple.Network, g *engine.Game) (mv int, after uint64, reward
 	return mv, after, reward, mv >= 0
 }
 
+// searchMove picks the move by a depth-D deck-aware EXPECTIMAX with the net at the
+// leaves (ai.LeafEval must already be net.Value, ai.MaxDepthCap the depth). This is
+// "leaf-aligned" self-play: the value learns the return under *search* play, which is
+// how it will actually be used (as an expectimax leaf) — directly targeting T3's
+// finding that a greedy-trained value is miscalibrated as a search leaf. Falls back to
+// the greedy 1-step choice if the search returns no positive move. Returns the same
+// (move, afterstate, reward, ok) tuple as bestMove so the TD update is unchanged.
+func searchMove(net *ntuple.Network, g *engine.Game) (mv int, after uint64, reward int, ok bool) {
+	board := engine.PackBoard(g.Board)
+	mv = ai.ExpectSearchBB(board, g.DeckCounts(), g.NextHint())
+	if mv < 0 {
+		return bestMove(net, g)
+	}
+	nb, _, changeNum := gameboard.MakeMove(g.Board, mv)
+	if changeNum == 0 {
+		return bestMove(net, g)
+	}
+	ab := engine.PackBoard(nb)
+	return mv, ab, engine.ScoreBB(ab) - g.Score(), true
+}
+
 // trainGame plays one self-play game, updating net by afterstate TD(0):
 // V(s'_t) <- V(s'_t) + alpha * ( r_{t+1} + V(s'_{t+1}) - V(s'_t) ), with a target
 // of 0 for the last afterstate (no future reward after the game ends).
-func trainGame(net *ntuple.Network, seed int64, alpha float64, maxMoves int, tc bool) {
+func trainGame(net *ntuple.Network, seed int64, alpha float64, maxMoves, searchDepth int, tc bool) {
 	learn := func(after uint64, tdErr float64) {
 		if tc {
 			net.UpdateTC(after, tdErr, alpha)
@@ -61,7 +84,16 @@ func trainGame(net *ntuple.Network, seed int64, alpha float64, maxMoves int, tc 
 	var prev uint64
 	havePrev := false
 	for g.Moves < maxMoves {
-		mv, after, reward, ok := bestMove(net, g)
+		var (
+			mv, reward int
+			after      uint64
+			ok         bool
+		)
+		if searchDepth > 0 {
+			mv, after, reward, ok = searchMove(net, g) // leaf-aligned self-play
+		} else {
+			mv, after, reward, ok = bestMove(net, g) // greedy self-play
+		}
 		if !ok {
 			break
 		}
@@ -124,6 +156,7 @@ func main() {
 	out := flag.String("out", "models/ntuple.gob", "save the trained network here")
 	resume := flag.String("resume", "", "resume from an existing network file")
 	tuples := flag.String("tuples", "small", "tuple set: small (4x 4-cell, ~1MB) | big (4x 6-cell, ~270MB) | big2 (8x 6-cell, ~540MB, strongest)")
+	searchDepth := flag.Int("search-depth", 0, "0=greedy self-play (default); >0 = leaf-aligned: pick moves by depth-D expectimax with the net as leaf, so the value learns to be a good SEARCH LEAF (slower per game)")
 	flag.Parse()
 
 	if *alphaFinal < 0 {
@@ -145,9 +178,17 @@ func main() {
 	if *tc {
 		net.EnableTC()
 	}
+	if *searchDepth > 0 { // leaf-aligned self-play needs the search + net-as-leaf ready
+		utils.InitGameScoreTable()
+		ai.MaxDepthCap = *searchDepth
+		ai.LeafEval = net.Value
+	}
 	tcStr := ""
 	if *tc {
 		tcStr = ", TC"
+	}
+	if *searchDepth > 0 {
+		tcStr += fmt.Sprintf(", search-depth=%d (leaf-aligned)", *searchDepth)
 	}
 	fmt.Printf("Training %d games, alpha %.3f->%.3f%s, %d tuples, eval seeds 1..%d (train seeds from %d)\n",
 		*games, *alpha, *alphaFinal, tcStr, len(net.Tuples), *evalN, *trainSeed)
@@ -159,7 +200,7 @@ func main() {
 	evalAndReport(net, 0, *evalN, *maxMoves, 0) // baseline (untrained)
 	for i := 0; i < *games; i++ {
 		a := *alpha + (*alphaFinal-*alpha)*(float64(i)/denom) // linear anneal
-		trainGame(net, *trainSeed+int64(i), a, *maxMoves, *tc)
+		trainGame(net, *trainSeed+int64(i), a, *maxMoves, *searchDepth, *tc)
 		if (i+1)%*evalEvery == 0 || i+1 == *games {
 			evalAndReport(net, i+1, *evalN, *maxMoves, time.Since(start))
 			if err := net.Save(*out); err != nil { // checkpoint each eval

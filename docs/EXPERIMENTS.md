@@ -209,17 +209,24 @@ _Planned: depth 6 (on cloud); heuristic vs N-tuple leaf; beam on/off; TT on/off.
 
 ## 5. Training runs (N-tuple TD self-play)
 
-### ★ Learning-curve comparison (T1 vs T2 vs T4) — the phase transition
-> Consolidated view of the three greedy-eval curves (mean of 1000 held-out games,
-> sampled every 100–500k training games). Interactive figure (hover for any point,
-> both themes): **https://claude.ai/code/artifact/8ef3aedc-1ae2-4e62-9ecb-5567fe477049**
-> — regenerate from the logs with `scripts/learning_curve.py`.
+### ★ Training runs at a glance (T1–T6) + learning-curve comparison
+> Every N-tuple TD self-play run so far, greedy-eval mean of 1000 fixed held-out games.
+> Raw logs: `results/cloud_t3/train{,_big}.log` (T1/T2), `results/cloud_t4/…` (T4),
+> `results/cloud_t5/train_big_tc.log` (T5), `results/cloud_t6/train_big2.log` (T6).
+> Interactive figure (T1/T2/T4; T5/T6 pending refresh):
+> **https://claude.ai/code/artifact/8ef3aedc-1ae2-4e62-9ecb-5567fe477049** —
+> regenerate from any log with `scripts/learning_curve.py`.
 
-| run | tuples | α schedule | TC | games | peak mean | final mean | phase jump? |
-|---|---|---|---|---|---:|---:|---|
-| **T1** | small 4×4 (~1 MB) | const 0.1 | no | 5M | 10,709 | 9,868 | no — capacity-capped ≈10k |
-| **T2** | big 4×6 (~270 MB) | const 0.1 | no | 10M | **21,371** | 20,968 | **yes, near 4M games** |
-| **T4** | big2 8×6 (~540 MB) | 0.1→0.01 anneal | yes | 15M | 9,809 | 9,608 | no — smooth crawl, never jumps |
+| run | tuples | α schedule | TC | games | peak mean | final mean | 3072 | verdict |
+|---|---|---|---|---:|---:|---:|---:|---|
+| **T1** | small 4×4 (~1 MB) | const 0.1 | no | 5M | 10,709 | 9,868 | 0% | capacity-capped ≈10k (no phase jump) |
+| **T2** | big 4×6 (~270 MB) | const 0.1 | no | 10M | **21,371** | 20,968 | 0% | **best** — phase jump ~4M; still rising @10M |
+| **T3** | — (T2 model as expectimax **leaf**) | — | — | — | — | — | — | beats hand heuristic only at d3; loses d4–d5, 8–11× slower |
+| **T4** | big2 8×6 (~540 MB) | 0.1→0.01 anneal | yes | 15M | 9,809 | 9,608 | 0% | **regressed** — both bad levers stacked |
+| **T5** | big 4×6 (~270 MB) | 0.1→0.01 anneal | yes | 15M | 16,028 | 16,028 | 0% | TC+anneal hurts big by −24% (vs T2) |
+| **T6** | big2 8×6 (~540 MB) | const 0.1 | no | 15M | 16,506 | 16,506 | 0% | big2 under-trained (−21% vs T2 but steepest still-rising curve) |
+
+Two clean results fall out of this table: (1) T2's **phase transition** (the representation-strength story), and (2) the **2×2 ablation** (const-α ≫ TC+anneal; big2 under-trained; T4 = both) — detailed below. Best model so far: **T2** (big, const α). Every run's 3072-rate is 0% (all are greedy depth-0 values, an order of magnitude below the depth-6 expectimax — their use is as a search leaf, T3/T9).
 
 - **The single most important shape in the whole training story is T2's phase
   transition.** All three curves rise fast to ~10k in the first ~200k games; then
