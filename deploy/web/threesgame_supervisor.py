@@ -183,7 +183,10 @@ def main():
         score = replay["final_score"]
         msg = (f"game {g+1}/{a.games}: over={over} score={score} "
                f"max_tile={replay['max_tile']} moves={replay['moves']}")
-        if keeper:
+        # Only a NATURAL game over ("Out of moves!") has a real settlement screen; a
+        # run that just exhausted its restart budget (over=False) left a black/wedged
+        # canvas, so never let it become the saved best.
+        if keeper and over:
             shot = None
             try:
                 with open(png_path, "rb") as f:
@@ -192,6 +195,8 @@ def main():
                 pass
             saved, _, best = keeper.consider(replay, shot)
             msg += f" | best {best}" + (" -> NEW BEST saved" if saved else "")
+        elif not over:
+            msg += " | not a natural game-over — NOT saved (raw score only)"
         print(msg, flush=True)
 
 
