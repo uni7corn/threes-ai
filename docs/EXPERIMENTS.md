@@ -375,7 +375,10 @@ win is simply more games on the const-α recipe (never TC/anneal again):
   overtakes T2, big2 was just under-trained (new best); if it plateaus below, `big` is
   the right size. `git lfs` for the 117 MB checkpoint.
 
-_Planned later: DQN / PPO / AlphaZero-style baselines (Phase 3, needs a GPU box)._
+_Phase 3 RL (now unblocked by an H100): DQN/PPO baselines (`rl/dqn.py`, `rl/ppo.py`)
+and an expectimax→AlphaZero distillation pipeline (`cmd/gen-teacher` → `rl/distill.py` →
+batched `rl/alphazero.py --init`) — see `rl/README.md`. Also planned: T9 leaf-aligned
+N-tuple (`scripts/train_leaf_aligned.sh`, `cmd/train -search-depth`)._
 
 ## 6. Deployment / records (Phase 4 — live web scoring)
 
@@ -387,15 +390,21 @@ schema (plays in `web/replay.html`); `deploy/recorder.py` keeps only the best ga
 | Site | Engine | Final score | Max tile | Moves | Player name |
 |------|--------|------------:|---------:|------:|-------------|
 | threesjs.io (Unity WebGL) | canvas colour+OCR, engine-in-the-loop | **9,993** | 384 | 431 | Github halfrost |
-| play.threesgame.com (WebGL) | localStorage slot.0 (exact board) | **23,634** | 768 | 407 | Github halfrost |
+| play.threesgame.com (WebGL) | localStorage slot.0 (exact board) | **200,142** | **3072** | 2034 | Github halfrost |
 | **native iOS Threes on Apple-Silicon Mac** | screen vision + engine-trust tracking, MOUSE-drag driven | **30,285** | **768** | ~230 | in-app `Github halfrost` |
 
 The two web sites went to a genuine game over ("Out of moves!"). For each we captured the site's own
 **score-settlement screen** — threesjs.io shows `Your score: 9,993` on its Unity
 game-over screen; play.threesgame.com flips every tile to its point value and
-tallies `23,634` (the WebGL buffer must be preserved to screenshot it non-black,
-and the reveal only arms on a live game over). Replays + these settlement
-screenshots under `results/replays/{threesjs,threesgame}/` (gitignored artifacts).
+tallies **200,142** on its best game (a **3072** tile, 2034 moves —
+`results/replays/threesgame/settlement_200142.png`; the WebGL buffer must be preserved
+to screenshot it non-black, and the reveal only arms on a live game over). Getting that
+clean high game needed two fixes to the headless supervisor: only keep a **natural**
+game-over as "best" (a run that just exhausts its restart budget leaves a black/wedged
+canvas at a mid-game score — this is how a raw 67,428 with no real settlement briefly
+looked like the best), and a large restart budget (300) so a long ~2000-move game can
+reach its real "Out of moves!" through the ~15-plies-per-wedge WebGL stalls. Replays +
+settlement screenshots under `results/replays/{threesjs,threesgame}/` (gitignored).
 
 The **native iOS Threes app running on an Apple-Silicon Mac** is the third target and
 the hardest — no DOM, no localStorage we could decode, an obfuscated + cfprefsd-cached
