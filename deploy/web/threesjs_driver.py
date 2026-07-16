@@ -87,6 +87,23 @@ NEXT_XY = (549, 60)   # next-tile preview, top-centre (1100x1000 viewport)
 BOARD_CLIP = {"x": 300, "y": 115, "width": 500, "height": 710}   # the 4x4 grid region
 
 
+def _classify_next(im, scratch=None):
+    """Classify the next-tile PREVIEW by colour only. Unlike a board cell, the preview
+    is only ever 1/2/3 or a bonus '+', never a high tile — so we never OCR it. Crucial:
+    the '3' preview renders as an almost blank WHITE card whose faint digit tesseract
+    reads as -1 every single time; that silently told the deck-aware search 'a bonus is
+    coming' on ~1/3 of all turns (every 3) and desynced the DeckTracker, collapsing play
+    to ~384. Colour is unambiguous: red=1, blue=2, near-white card=3, anything else=bonus."""
+    r, g, b = _mean_rgb(im, NEXT_XY[0], NEXT_XY[1])
+    if r > g + 30 and r > b + 30 and g < 170:
+        return 1                                    # red tile
+    if b > g + 18 and b > r + 40 and r < 175:
+        return 2                                    # blue tile
+    if r > 200 and g > 200 and b > 200 and max(r, g, b) - min(r, g, b) < 45:
+        return 3                                    # white card: the only white next value
+    return 0                                        # bonus '+' (distinct look) -> average
+
+
 def wait_stable(pg, tries=7, gap=90):
     """Block until the board region stops animating (two frames ~identical), so
     OCR runs on a settled frame instead of a mid-slide/merge frame."""
@@ -111,7 +128,7 @@ def read_board(pg, scratch):
     from PIL import Image
     im = Image.open(io.BytesIO(pg.screenshot(type="png"))).convert("RGB")
     board = [[_classify(im, COLC[c], ROWC[r], scratch) for c in range(4)] for r in range(4)]
-    nxt = _classify(im, NEXT_XY[0], NEXT_XY[1], scratch)   # 1/2/value, or -1 (bonus "+"/unknown)
+    nxt = _classify_next(im, scratch)                      # 1/2/3, or 0 (bonus "+")
     return board, nxt
 
 
@@ -205,7 +222,7 @@ def play(a):
 
         def read_all(im):
             board = [[_classify(im, COLC[c], ROWC[r], scratch) for c in range(4)] for r in range(4)]
-            return board, _classify(im, NEXT_XY[0], NEXT_XY[1], scratch)
+            return board, _classify_next(im, scratch)
 
         def read_stable_all():
             wait_stable(pg)
@@ -275,7 +292,18 @@ def play(a):
                         nb[r][c] = INDEX.get(sv, 0) if sv and sv > 0 else 0
                         break
                 board = nb
-                nxt = _classify(im, NEXT_XY[0], NEXT_XY[1], scratch)
+                nxt = _classify_next(im, scratch)
+                if os.environ.get("THREESJS_DIAG"):   # per-move engine-vs-OCR audit (gated)
+                    ob, _ = read_all(im)
+                    eng_v = [[VALUE[v] for v in row] for row in board]
+                    ocr_v = [[(VALUE[INDEX[v]] if v in INDEX else (0 if v == 0 else -1))
+                              for v in row] for row in ob]
+                    mism = [f"({r},{c}) eng={eng_v[r][c]} ocr={ocr_v[r][c]}"
+                            for r in range(4) for c in range(4)
+                            if ocr_v[r][c] >= 0 and ocr_v[r][c] != eng_v[r][c]]
+                    with open("/tmp/threesjs_diag.log", "a") as df:
+                        df.write(f"step {step} nv={nv} eng={eng_v}"
+                                 + (f" MISMATCH {mism}" if mism else "") + "\n")
                 if step % 20 == 0:
                     print(f"  step {step}: max {best_tile} score {rec.final_score()} "
                           f"next {nv} move {MOVE_NAME[best]} desync {desyncs}")
