@@ -8,8 +8,19 @@
 #
 # Fix: fine-tune it under self-play where every move is chosen by a depth-D expectimax
 # with the net itself at the leaves (`-search-depth D`). Now the value learns the return
-# under *search* play — exactly how it is used. Warm-started from T2 so we only re-align
-# a good value (few games, small alpha), not learn from scratch.
+# under *search* play — exactly how it is used. Warm-started from the strongest greedy net
+# so we only re-align a good value (few games, small alpha), not learn from scratch.
+#
+# BASE CHANGED (read this before comparing runs): T7 resumed T2 in place, so on the box
+# `models/ntuple_big.gob` is now T7's **30M** net (72.7 MB, mean 23,507) — NOT T2's 10M
+# (64.5 MB, mean 20,968). Warm-starting from T7 is the right call (strongest base), but it
+# means this run reads "T7 + leaf-alignment". The script prints which base it loaded; to
+# pin one explicitly:  IN=models/ntuple_big_t7_30m.gob bash scripts/train_leaf_aligned.sh
+#
+# Why this is now the last hope for the N-tuple line: T7 showed `big` plateaus at ~23-24k
+# (≈ depth-1 expectimax) and T3 showed the greedy-trained leaf LOSES to the hand heuristic
+# at d4/d5 with the gap widening. If leaf-alignment doesn't close that, the problem isn't
+# training length — it's the single-net recipe (→ multi-staging, docs/EXPERIMENTS.md T10).
 #
 # Cost: depth-D self-play evaluates the net over a d-ply expansion each move, so it is
 # ~1-2 orders of magnitude slower per game than greedy. Single-threaded (the search
@@ -34,16 +45,26 @@ cd "$(dirname "$0")/.."
 GAMES="${1:-1500000}"
 ALPHA="${2:-0.03}"
 DEPTH="${3:-1}"
-IN="models/ntuple_big.gob"          # warm-start from T2 (best greedy value, ~64MB)
-OUT="models/ntuple_big_leaf.gob"    # new file — keep T2's greedy model intact
+IN="${IN:-models/ntuple_big.gob}"   # override to pin a base, e.g. models/ntuple_big_t7_30m.gob
+OUT="models/ntuple_big_leaf.gob"    # new file — never clobbers the greedy model
 
 echo "Building train..."
 go build -o bin/train ./cmd/train
 
 if [ ! -f "$IN" ]; then
-  echo "ERROR: $IN (T2 checkpoint) not found — fetch it first." >&2
+  echo "ERROR: $IN not found — fetch a big checkpoint first." >&2
   exit 1
 fi
+
+# Say out loud WHICH net we are re-aligning: T2's 10M and T7's 30M live under the same
+# default name on different machines, and the whole comparison hinges on knowing which.
+SZ=$(wc -c < "$IN" | tr -d ' ')
+case "$SZ" in
+  64512541) BASE="T2 10M (mean 20,968)" ;;
+  72702310) BASE="T7 30M (mean 23,507)" ;;
+  *)        BASE="UNKNOWN checkpoint" ;;
+esac
+echo "Base: ${IN} = ${SZ} bytes -> ${BASE}"
 
 echo "Leaf-aligned fine-tune: resume ${IN}, big, alpha=${ALPHA}, search-depth=${DEPTH}, ${GAMES} games -> ${OUT}"
 ./bin/train -resume "$IN" -games "$GAMES" -alpha "$ALPHA" -tuples big \
