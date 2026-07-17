@@ -57,9 +57,15 @@ func main() {
 	addr := flag.String("addr", ":9010", "listen address")
 	depthCap := flag.Int("depthcap", 5, "search depth cap")
 	deckAware := flag.Bool("deckaware", true, "use the supplied deck counts when present")
+	parallelRoot := flag.Bool("parallelroot", true,
+		"evaluate the 4 root moves in parallel goroutines. True (default) minimises latency "+
+			"for ONE game. Set false when many browser sessions hit this server at once "+
+			"(the cloud grind): each search then runs sequentially and parallelism comes "+
+			"from the concurrent games, avoiding 4x goroutine oversubscription.")
 	flag.Parse()
 
 	ai.MaxDepthCap = *depthCap
+	ai.ParallelRoot = *parallelRoot
 	utils.InitGameScoreTable()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("moveserver ok\n")) })
