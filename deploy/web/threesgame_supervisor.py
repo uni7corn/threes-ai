@@ -40,8 +40,17 @@ INNER = os.path.join(HERE, "threesgame_driver.py")
 
 
 def _pkill_profile(profile):
-    """Kill any Chrome still holding this profile (a killed inner can orphan it)."""
-    subprocess.run(["pkill", "-9", "-f", profile], check=False)
+    """Kill any Chrome still holding this profile (a killed inner can orphan it).
+
+    Match Chrome's own `--user-data-dir=<profile>`, NOT the bare profile path. When the
+    profile is passed explicitly (as the cloud grind does, one per session), the SUPERVISOR's
+    OWN command line contains `--profile <profile>`, so a bare `pkill -f <profile>` matches
+    this very process and SIGKILLs the supervisor before it can launch a single game — which
+    is exactly what happened on the 240-core box (it self-immolated right after printing
+    `=== game 1/1 ===`). Chrome's flag string `user-data-dir=<profile>` appears only in the
+    browser processes we actually want to reap. (No leading `--` in the pattern, or pkill
+    would parse it as its own option.)"""
+    subprocess.run(["pkill", "-9", "-f", f"user-data-dir={profile}"], check=False)
 
 
 def _mtime(path):
