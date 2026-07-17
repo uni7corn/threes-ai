@@ -32,12 +32,41 @@ OUT="models/ntuple_big2.gob"        # continue in place (pre-resume ver preserve
 echo "Building train..."
 go build -o bin/train ./cmd/train
 
+T6_BYTES=117275545
+
 if [ ! -f "$IN" ]; then
-  echo "ERROR: $IN not found — need T6's checkpoint to resume (git lfs pull)." >&2
+  # NOT `git lfs pull`: models/ is gitignored and untracked on master, so there is no
+  # pointer here to resolve. The checkpoint lives on the stable archive branch, and only
+  # a real clone/checkout smudges LFS back into the actual model.
+  cat >&2 <<EOF
+ERROR: $IN not found — fetch T6's checkpoint from the stable archive:
+
+  rm -rf /tmp/ckpt
+  git clone --branch archive/ntuple-checkpoints --single-branch --depth 1 \\
+    https://github.com/halfrost/threes-ai.git /tmp/ckpt
+  cp /tmp/ckpt/models/ntuple_t6_big2_15m.gob $IN
+  ls -la $IN     # MUST be ${T6_BYTES} bytes; ~134 means git-lfs is missing (pointer)
+  rm -rf /tmp/ckpt
+
+Needs git-lfs (dnf install -y git-lfs && git lfs install). Do NOT use
+'git show <branch>:<file> > $IN' — that writes the LFS POINTER, not the model.
+EOF
   exit 1
 fi
 
-echo "Resuming big2+const-alpha=${ALPHA} from ${IN}: +${GAMES} games (seeds from ${SEED}) -> ${OUT}"
+# Guard the pointer trap: a 134-byte "checkpoint" would otherwise blow up deep inside gob
+# decoding (or look like a fresh net) only after the box is committed to a long run.
+SZ=$(wc -c < "$IN" | tr -d ' ')
+if [ "$SZ" -lt 1000000 ]; then
+  echo "ERROR: $IN is only ${SZ} bytes — that is an LFS pointer, not a model." >&2
+  echo "       git-lfs did not smudge it. Install git-lfs and re-fetch (see above)." >&2
+  exit 1
+fi
+if [ "$SZ" != "$T6_BYTES" ]; then
+  echo "WARNING: $IN is ${SZ} bytes, expected ${T6_BYTES} (T6, big2 15M). Resuming anyway." >&2
+fi
+
+echo "Resuming big2+const-alpha=${ALPHA} from ${IN} (${SZ} bytes): +${GAMES} games (seeds from ${SEED}) -> ${OUT}"
 ./bin/train -resume "$IN" -games "$GAMES" -alpha "$ALPHA" -tuples big2 \
   -train-seed "$SEED" -eval-every 500000 -eval-n 1000 -out "$OUT"
 
