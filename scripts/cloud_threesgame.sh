@@ -130,15 +130,20 @@ for i in $(seq 0 $((SESSIONS - 1))); do
   # resumes a wedged game from that profile's localStorage, so sharing one would make
   # sessions resume each other's boards.
   mkdir -p "$OUT_ROOT/$i"
-  # move-timeout 120 < stall-timeout 150: a deep search must not be mistaken for a wedge
-  # and killed mid-think (that feedback loop burned 189 restarts on the Mac).
+  # Ordering constraint: move-timeout (120) < stall-timeout (300). The move-timeout keeps a
+  # single deep search from hanging forever; stall-timeout is how long the supervisor waits
+  # for the ply log to grow before calling the inner wedged. It must clear BOTH a slow
+  # depth-6 move AND the cold WebGL start: with no GPU, the first game's asset download +
+  # SwiftShader shader compile took >150s and got false-wedged at 0 plies (verified on the
+  # box — run 0 died, run 1 then played fine). 300s absorbs that cold start; once moving,
+  # a genuine wedge is still caught within 5 min.
   nohup python3 -W ignore deploy/web/threesgame_supervisor.py \
     --server "http://127.0.0.1:$PORT" \
     --record-dir "$OUT_ROOT/$i" \
     --profile "$WORK_ROOT/prof_$i" \
     --work-dir "$WORK_ROOT/work_$i" \
     --games "$GAMES" --moves 4000 --depth-cap "$DEPTH" \
-    --move-timeout 120 --stall-timeout 150 --max-restarts 400 \
+    --move-timeout 120 --stall-timeout 300 --max-restarts 400 \
     > "$WORK_ROOT/session_$i.log" 2>&1 &
   pids+=($!)
   sleep 0.5      # stagger the Chrome launches
