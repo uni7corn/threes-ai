@@ -454,16 +454,39 @@ A single net tops out at **~23–24k greedy, 0.0% at 3072**, and cannot beat the
 leaf. This is a clean, convergent negative result and it points at exactly one structural
 change left.
 
-### T10 — multi-staging — THE next move (now unblocked: capacity question settled)
-The 2016 MS-TD paper reaches the 6144 in **7.83%** with a *learned* agent; our single net is
-at **0.0%**. Their "**MS**" is literally *multi-stage*: **separate networks for separate phases
-of the game**. The value of a board changes character once big tiles dominate — one weight set
-has to average over irreconcilable regimes and ends up mediocre at all of them, which is
-exactly the ~23k plateau we keep hitting from every direction. Plan: split by max-tile
-(e.g. `<384 / 384–1536 / ≥3072`), train a `big`-sized net per stage on that stage's positions
-(dispatch on the live board's max tile), warm-starting each stage from T7's 30M net. `big`,
-not `big2` — T8 proved the extra capacity is wasted. This is now the **primary** N-tuple
-experiment; T7/T8/T9 exist to justify skipping straight to it.
+### ★ T10 — multi-staging — BUILT and validated; two variants running
+The 2016 MS-TD paper reaches the 6144 in **7.83%** with a *learned* agent (vs 0.45% for a
+plain net); our single net is at **0.0%**. Their "**MS**" is literally *multi-stage*:
+**separate value functions per game phase**. A board's value changes character once big tiles
+dominate, so one weight set averages over irreconcilable regimes and ends up mediocre at all
+of them — exactly the ~23k plateau we hit from every direction (T7/T8/T9). T10 gives each
+phase its own net.
+
+**Implementation** (`cmd/train-ms`, `scripts/train_ms.sh`; `cmd/train` left untouched so all
+baselines still run):
+- **Stages by max-tile index**: `-stages 10,13` ⇒ 3 stages `≤192 | 384–1536 | ≥3072` (indices
+  10=384, 13=3072). One full `big` net per stage — `big`, not `big2`, since T8 proved the
+  extra capacity is wasted.
+- **Learning** — afterstate TD(0) that flows across stage boundaries: the update touches the
+  stage net of the *previous* afterstate, and the bootstrap `V(s')` uses the stage net of the
+  *next* afterstate. Move selection dispatches each candidate afterstate to its own stage net.
+- **Warm-start every stage from T7's 30M** (`-init`): the top stages are otherwise data-starved
+  (from-scratch self-play reaches stage 1 only ~66 times in 200 games and stage 2 never). The
+  eval line prints per-stage `touched` counts so starvation is visible.
+- **Validated (smoke)**: warm-started, stage 1 got **35k** updates in 200 games (vs 66 from
+  scratch) and greedy mean rose **21.2k → 23.0k immediately** — the split is already helping and
+  the mechanics are correct. Seeds from 100M (disjoint from T1–T9).
+
+**Two variants in flight** (the free 01/02 boxes) to answer the key question — does the endgame
+stage need its *own* data, or does lower-stage specialisation alone lift play into it?
+- **`-stages 10,13`** (top stage `≥3072`): cleanest split, but that stage starts starved (even
+  T7 is 0% at 3072); the bet is that specialised stages 0/1 push play up until it fills.
+- **`-stages 10,12`** (top stage `≥1536`): the top stage gets data from the start, at the cost
+  of lumping 3072+ in with 1536.
+
+**Success = greedy mean clears T7's 23,507 and/or 3072% goes non-zero.** If T10 works, the same
+per-stage nets also become the expectimax leaf worth re-testing (T3 redux) now that each is
+calibrated to its phase.
 
 ## 6. Deployment / records (Phase 4 — live web scoring)
 
