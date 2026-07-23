@@ -120,6 +120,15 @@ if ! curl -s "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
 fi
 curl -s "http://127.0.0.1:$PORT/" >/dev/null || { echo "moveserver did not come up"; cat /tmp/moveserver_$PORT.log; exit 1; }
 
+# Fresh run => fresh records. Two runs otherwise share session dirs 0..N-1 AND leave the
+# higher dirs of a bigger prior run behind, so `--collect` globs BOTH and reports a stale
+# best (a 64-session run's 68,922/1536 masked a fresh 16-session run's real results for an
+# hour). Archive the prior records instead of deleting them.
+if [ -d "$OUT_ROOT" ] && [ -n "$(ls -A "$OUT_ROOT" 2>/dev/null)" ]; then
+  BK="${OUT_ROOT}.prev.$(date +%s)"
+  mv "$OUT_ROOT" "$BK"
+  echo "== archived prior records -> $BK (so --collect reflects THIS run only) =="
+fi
 mkdir -p "$OUT_ROOT" "$WORK_ROOT"
 echo "== $SESSIONS session(s) x $GAMES game(s), depth $DEPTH, server :$PORT =="
 [ "$SMOKE" = 1 ] && echo "== SMOKE: proving ONE session reaches a real game over on this box =="
