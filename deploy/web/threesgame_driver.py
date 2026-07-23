@@ -219,6 +219,16 @@ def play(a):
             nv = st["next"] if st["next"] in (1, 2, 3) else 0
             best = mc.ask(board, next_val=nv, deck=deck.remaining())
             if best < 0:
+                # No legal move. On a real board that's game over — but an EMPTY board
+                # (all zeros) means the game hasn't spawned its starting tiles yet: under
+                # slow software rendering the fresh-start board read races the init, so the
+                # driver would otherwise bank a 0-move "game over" (score=0, max=0) and burn
+                # the game slot. Treat empty-and-early as not-ready and bail so the
+                # supervisor retries this game index instead of recording a dud.
+                if step == 0 and all(v == 0 for row in board for v in row):
+                    print("empty board at start (not initialised) — bail for resume",
+                          flush=True)
+                    ctx.close(); sys.exit(3)
                 over = True            # moveserver: no legal move == real game over
                 break
             m0 = st["moves"]
