@@ -236,7 +236,9 @@ def play(a):
             # reads (spawn settled). A wedged read just hangs -> supervisor resumes.
             registered = False
             st_new = None
-            for _ in range(12):            # up to ~3.6s
+            poll_iters = max(12, int(a.move_poll_secs / 0.3))
+            repress_every = max(20, poll_iters // 3)   # re-press ~3x over the budget
+            for i in range(poll_iters):            # up to a.move_poll_secs
                 pg.wait_for_timeout(300)
                 s = read_state(cdp)
                 if not s:
@@ -244,6 +246,8 @@ def play(a):
                 if not registered:
                     if s["moves"] > m0 or s["over"]:
                         registered, st_new = True, s
+                    elif i and i % repress_every == 0:
+                        pg.keyboard.press(ARROW[best])   # first press may have been dropped
                 elif s["over"] or s["board"] == st_new["board"]:
                     st_new = s
                     break
@@ -308,6 +312,16 @@ def main():
                          "slow positions that blow past it — the urllib TimeoutError kills "
                          "this process, the supervisor relaunches it, and the relaunch storm "
                          "loads the box so moves get slower still. Raise it with the depth.")
+    ap.add_argument("--move-poll-secs", type=float, default=6.0,
+                    help="How long to wait for one pressed move to REGISTER (NumMoves to "
+                         "increment in localStorage) before calling it a stall and bailing. "
+                         "The default 6s suits a GPU. On a GPU-less box the game's WebGL is "
+                         "SwiftShader-software-rendered, so a slide/merge takes much longer to "
+                         "process+persist — under N-way CPU contention it blows past a few "
+                         "seconds and EVERY move looks like it 'didn't register', stalling the "
+                         "whole grind (verified: 16 sessions, 0 moves in 30s). Raise it well "
+                         "above the real per-move latency there (e.g. 30-60). We also re-press "
+                         "the key periodically in case the first press was dropped.")
     a = ap.parse_args()
     play(a)
 

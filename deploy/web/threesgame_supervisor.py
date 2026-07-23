@@ -102,7 +102,8 @@ def run_one_game(a, profile, log_path, png_path):
              "--server", a.server, "--profile", profile,
              "--resume-log", log_path, "--gameover-png", png_path,
              "--moves", str(a.moves), "--depth-cap", str(a.depth_cap),
-             "--move-timeout", str(a.move_timeout)]
+             "--move-timeout", str(a.move_timeout),
+             "--move-poll-secs", str(a.move_poll_secs)]
             + (["--headed"] if a.headed else []),
             env=env, start_new_session=True)     # own process group so we can killpg
         tag = f"[sup] run {restarts} pid={proc.pid}"
@@ -180,6 +181,10 @@ def main():
                          "with the search depth (see threesgame_driver.py --move-timeout). "
                          "Keep --stall-timeout ABOVE this, or the supervisor calls a slow "
                          "but healthy search a wedge and kills it mid-think.")
+    ap.add_argument("--move-poll-secs", type=float, default=6.0,
+                    help="passed to the inner driver: how long to wait for a pressed move to "
+                         "register before bailing. Raise it on a GPU-less box where software "
+                         "rendering makes each move slow (see threesgame_driver.py).")
     ap.add_argument("--stall-timeout", type=float, default=30.0)
     ap.add_argument("--max-restarts", type=int, default=40)
     ap.add_argument("--profile", default=os.path.expanduser("~/.threes-tg-profile"))

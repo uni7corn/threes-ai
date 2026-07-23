@@ -144,6 +144,7 @@ for i in $(seq 0 $((SESSIONS - 1))); do
     --work-dir "$WORK_ROOT/work_$i" \
     --games "$GAMES" --moves 4000 --depth-cap "$DEPTH" \
     --move-timeout 120 --stall-timeout 300 --max-restarts 400 \
+    --move-poll-secs "${MOVE_POLL_SECS:-40}" \
     > "$WORK_ROOT/session_$i.log" 2>&1 &
   pids+=($!)
   sleep 0.5      # stagger the Chrome launches
