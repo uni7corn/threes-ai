@@ -408,32 +408,62 @@ paired seeds, deck-aware). Swaps the hand heuristic leaf for the T2 net:
   lucky *expectimax d4* game from this run's baseline arm, not a new record; our best
   remains the 2,161,704 / 12288 at d6.)
 
-### T8 — resume T6 (`big2` + const α) → 40M — running (machine 01)
-`scripts/train_big2_resume.sh`, from `models/ntuple_big2.gob` (117 MB, `git lfs`). Now the
-**decisive** experiment: T7 proved `big` plateaus at ~23–24k, so if `big2` (2× the weights,
-and the steepest still-rising curve at 15M) clears that, the bottleneck was capacity and
-scaling up is the answer; if it plateaus below, `big` is the right size and **capacity is
-not the problem — the recipe is** (→ multi-staging, below).
+### ★ T8 — resume T6 (`big2` + const α) 15M → 40M — DONE. **Capacity is NOT the bottleneck.**
+- Config: `scripts/train_big2_resume.sh`; resume `models/ntuple_big2.gob` (T6's 15M),
+  +25,000,000 games, α=0.1 const, `big2` (8×6 = 2× the weights of `big`), train seeds 25M–50M,
+  held-out eval seeds 1..1000. 77,380 s ≈ **21.5 h** on the 240-core box. Log:
+  `docs/runs/train_big2_resume_t8.log`.
+- Curve: 16,506 (T6) → 19k (5M) → 21k (13M) → **plateau ~22–23k**. Peak **22,911** at 36.5M
+  cumulative, final (40M) **22,269**. From 12M cumulative on it just oscillates in a 20.5–23k
+  band with no trend — converged.
+- **The verdict: `big2` (22.3k) never catches `big` (T7: 23.5k), despite 2× the weights AND
+  40M vs 30M games.** More capacity did not help — if anything it's ~1k worse. **3072 = 0.0%,
+  6144 = 0.0%** at every eval (max spikes to 88k, rarely 180–256k). So capacity is decisively
+  **not** the lever; the ceiling is the single-net greedy-TD *recipe*.
+- (Nice detail for the paper: the *median* steps from ~10k to ~20k around 4–5M games — the
+  policy crosses a threshold where it reliably banks a mid tile — then stalls. Mean and median
+  converge (~22k/22k), i.e. the distribution tightened but its ceiling didn't rise.)
 
-### T9 — leaf-aligned bootstrap — next (machine 02, now free after T7)
-`scripts/train_leaf_aligned.sh`: resume, α=0.03, `-search-depth 1`, 1.5M games,
-train seeds from 90M (disjoint from T7's 20M–40M), out `models/ntuple_big_leaf.gob`.
-**Base changed**: it now warm-starts from **T7's 30M net (23.5k)**, not T2's 10M (21.0k) —
-T7 overwrote `models/ntuple_big.gob` in place on machine 02. That is the better base
-(strongest available), but it means T9 reads "T7 + leaf-alignment", not "T2 + leaf-alignment".
+### ★ T9 — leaf-aligned bootstrap (approach "A") — DONE. Greedy **collapsed**; very likely dead.
+- Config: `scripts/train_leaf_aligned.sh`; warm-start **T7's 30M net (23,507)**, α=0.03,
+  `-search-depth 1` (moves chosen by depth-1 expectimax with the net at the leaf), 1.5M games,
+  train seeds from 90M, out `models/ntuple_big_leaf.gob`. 155,056 s ≈ **43 h** (the box was
+  contended in the last third — 1.0M→1.1M games took 27k s vs ~6.8k s earlier). Log:
+  `docs/runs/train_leaf_t9.log`.
+- Curve (greedy eval): 23,507 → **8,478** (100k) → 5,974 → 4,048 → … → **3,263** (1.5M).
+  A **monotonic 7× collapse with no recovery**; median 22,806 → 1,143.
+- Read carefully: greedy score is *not* the intended metric (the net is being re-aimed from
+  greedy player to search leaf, so *some* greedy drop is expected). **But a collapse to ~3.3k
+  is near-random play** — greedy move choice only needs the value's *ordering*, and losing the
+  ordering this badly means the value is very likely a *worse* leaf too, not a re-calibrated
+  one. Strong prior: **A failed** — α=0.03 with the net bootstrapping its own leaf diverged.
+- To confirm (needs the model, not uploaded): on machine 02 run
+  `bash scripts/eval_ntuple_search.sh models/ntuple_big_leaf.gob $(nproc) "3 4 5"` and compare
+  to T3's leaf numbers. If it doesn't clear T3 (it almost certainly won't), approach A is dead.
 
-### T10 — multi-staging — planned (the SOTA gap)
-The uncomfortable number from T7: the 2016 MS-TD paper reaches the 6144 in **7.83%** of
-games with a *learned* agent; our single net is at **0.0%** greedy, and as a leaf it loses
-to a hand heuristic (T3). Their **MS** is literally *multi-stage*: **separate networks for
-separate phases of the game**, because the value of a board configuration changes character
-once big tiles dominate — one set of weights has to average over irreconcilable regimes and
-ends up mediocre at all of them. We train one net for the whole game, which is very likely
-the single biggest thing we are missing — plausibly more valuable than either more games
-(T7: dead) or more weights (T8: pending). Sketch: split by max-tile (e.g. <384 / 384–1536 /
-≥3072), train a net per stage on that stage's positions, dispatch on the live board. Do this
-**after T8 reports**, so the capacity question is settled first and we know whether to
-multi-stage `big` or `big2`.
+### ★ The N-tuple line is capped — three levers tried, all negative → multi-stage (T10)
+Putting T7/T8/T9/T3 together, every single-net lever has now been ruled out:
+| lever | experiment | result |
+|---|---|---|
+| more games | T7 (`big` 10M→30M) | plateau 23.5k, **flat** |
+| more capacity | T8 (`big2` →40M) | 22.3k, **≤ big** |
+| align the leaf | T9 (search-depth-1 FT) | greedy **collapsed to 3.3k** |
+| use net as leaf | T3 (net in expectimax) | **loses** to hand heuristic, gap widens with depth |
+
+A single net tops out at **~23–24k greedy, 0.0% at 3072**, and cannot beat the hand-tuned
+leaf. This is a clean, convergent negative result and it points at exactly one structural
+change left.
+
+### T10 — multi-staging — THE next move (now unblocked: capacity question settled)
+The 2016 MS-TD paper reaches the 6144 in **7.83%** with a *learned* agent; our single net is
+at **0.0%**. Their "**MS**" is literally *multi-stage*: **separate networks for separate phases
+of the game**. The value of a board changes character once big tiles dominate — one weight set
+has to average over irreconcilable regimes and ends up mediocre at all of them, which is
+exactly the ~23k plateau we keep hitting from every direction. Plan: split by max-tile
+(e.g. `<384 / 384–1536 / ≥3072`), train a `big`-sized net per stage on that stage's positions
+(dispatch on the live board's max tile), warm-starting each stage from T7's 30M net. `big`,
+not `big2` — T8 proved the extra capacity is wasted. This is now the **primary** N-tuple
+experiment; T7/T8/T9 exist to justify skipping straight to it.
 
 ## 6. Deployment / records (Phase 4 — live web scoring)
 
